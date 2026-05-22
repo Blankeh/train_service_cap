@@ -1,0 +1,33 @@
+# ── Model ─────────────────────────────────────────────────────────────────────
+# yolov8n: nano — fastest, designed for edge devices like Pi4
+# yolov8s: small — more accurate, ~2× slower
+base_model: yolov8n.pt
+
+# ── Training ──────────────────────────────────────────────────────────────────
+epochs: 100
+batch: 32          # RTX 5080 16 GB VRAM — Muon optimizer needs headroom above forward pass
+imgsz: 640
+patience: 20       # early stopping — halts if no mAP gain for N epochs
+workers: 8
+device: "0"        # RTX 5080 — CUDA device 0
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+dataset: ./merged_dataset/data.yaml
+runs_dir: ./runs
+run_name: passenger_yolov8
+
+# ── Export for Raspberry Pi 4 (ARM Cortex-A72, no GPU) ───────────────────────
+export:
+  format: onnx     # ONNX Runtime gives best CPU throughput on Pi4 ARM
+  simplify: true   # prune redundant ops — smaller file, faster inference
+  opset: 17
+  int8: false      # INT8 quantization: ~2× faster but needs calibration images
+
+# ── Deploy via Cloudflare Worker ──────────────────────────────────────────────
+# train_service uploads here; Pi4 polls and pulls — no direct connection needed.
+# Override with env vars: CLOUDFLARE_WORKER_URL, CLOUDFLARE_API_KEY
+deploy:
+  enabled: false           # set CLOUDFLARE_DEPLOY_ENABLED=true to enable
+  worker_url: ""           # https://your-worker.workers.dev
+  api_key: ""              # same key used by ai_service — keep out of version control
+  timeout_seconds: 120

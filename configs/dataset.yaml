@@ -1,0 +1,23 @@
+datasets:
+  - path: "C:/Users/blank/Downloads/passenger counting.v8i.yolo26"
+    name: passenger_counting
+    class_map:
+      0: 0   # head -> person
+    splits: [train, valid, test]
+
+  - path: "C:/Users/blank/Downloads/bus-passenger-mask-rcnn dupli.yolo26"
+    name: bus_passenger
+    class_map:
+      0: 0   # man -> person
+      1: 0   # woman -> person
+    splits: [train]          # only has train; will be split automatically
+    auto_split:
+      train: 0.80
+      valid: 0.10
+      test:  0.10
+
+output:
+  path: ./merged_dataset
+  classes:
+    - person
+  seed: 42

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+
+# Pytest
+.pytest_cache/
+
+# Training artifacts
+runs/
+
+# Model weights
+*.pt
+
+# Datasets
+merged_dataset/
+**/images/
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.tif
+*.tiff
+*.webp

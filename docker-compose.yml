@@ -1,0 +1,21 @@
+services:
+  train:
+    build: .
+    volumes:
+      # Mount raw datasets (read-only)
+      - "${DS1_PATH}:/datasets/ds1:ro"
+      - "${DS2_PATH}:/datasets/ds2:ro"
+      # Persist preprocessed data and training runs across container restarts
+      - ./merged_dataset:/workspace/merged_dataset
+      - ./runs:/workspace/runs
+    environment:
+      - DEPLOY_URL=${DEPLOY_URL:-}
+      - DEPLOY_API_KEY=${DEPLOY_API_KEY:-}
+    # GPU support (requires nvidia-container-toolkit on the host)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
