@@ -1,0 +1,118 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# YOLOv8n-CBAM  —  FULLY EXPLICIT layer definition
+#
+# All channel sizes and repeat counts are the FINAL computed values for
+# YOLOv8 nano (width×0.25, depth×0.33) with 320×320 input.
+# No scaling multipliers are applied — what you see here is exactly what runs.
+#
+# Backbone: identical to standard yolov8n.pt → pretrained weights transfer
+# Neck:     PANet with CBAM attention after each detection-scale C2f block
+#
+# Input shape assumed: 3×320×320
+# ══════════════════════════════════════════════════════════════════════════════
+
+nc: 1               # overridden by data.yaml at runtime
+depth_multiple: 1.0 # repeats are already pre-computed below — no further scaling
+width_multiple: 1.0 # channels are already pre-computed below — no further scaling
+
+# ── Layer format ──────────────────────────────────────────────────────────────
+# [from, n, module, [args]]
+#   from  : -1 = previous layer; list = concat/multi-input
+#   n     : for C2f/C3 this becomes the INTERNAL bottleneck count (inserted into
+#           args by parse_model, outer loop n set to 1 automatically)
+#           for all other modules n is the outer sequential repeat (always 1 here)
+#   module: class name looked up in ultralytics.nn.modules (+ custom_modules)
+#   args  : constructor arguments AFTER c1 (Conv/C2f: c2, k, s, …; CBAM: c1)
+#
+# CBAM channel rule: c_out == c_in (passthrough); parse_model falls through to
+#   `else: c2 = ch[f]` which correctly tracks the unchanged channel count.
+# ══════════════════════════════════════════════════════════════════════════════
+
+backbone:
+  # ── Stage 0 — initial stem ─────────────────────────────────────────────────
+  #        from  n  module  [c_out, k, s]          c_in → c_out   spatial
+  - [-1,   1, Conv,  [16,  3, 2]]       # 0     3 → 16    320×320 → 160×160   P1/2
+
+  # ── Stage 1 ────────────────────────────────────────────────────────────────
+  - [-1,   1, Conv,  [32,  3, 2]]       # 1    16 → 32    160×160 → 80×80     P2/4
+  - [-1,   1, C2f,   [32,  True]]       # 2    32 → 32    80×80               n=1 bottleneck, shortcut=True
+
+  # ── Stage 2 ────────────────────────────────────────────────────────────────
+  - [-1,   1, Conv,  [64,  3, 2]]       # 3    32 → 64    80×80  → 40×40      P3/8
+  - [-1,   2, C2f,   [64,  True]]       # 4    64 → 64    40×40               n=2 bottlenecks, shortcut=True
+
+  # ── Stage 3 ────────────────────────────────────────────────────────────────
+  - [-1,   1, Conv,  [128, 3, 2]]       # 5    64 → 128   40×40  → 20×20      P4/16
+  - [-1,   2, C2f,   [128, True]]       # 6   128 → 128   20×20               n=2 bottlenecks, shortcut=True
+
+  # ── Stage 4 ────────────────────────────────────────────────────────────────
+  - [-1,   1, Conv,  [256, 3, 2]]       # 7   128 → 256   20×20  → 10×10      P5/32
+  - [-1,   1, C2f,   [256, True]]       # 8   256 → 256   10×10               n=1 bottleneck, shortcut=True
+
+  # ── SPPF — spatial pyramid pooling (fast) ─────────────────────────────────
+  - [-1,   1, SPPF,  [256, 5]]          # 9   256 → 256   10×10               pool_kernel=5
+
+
+head:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TOP-DOWN PATH  (large → small feature upsample, P5 → P4 → P3)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - [-1,        1, nn.Upsample, [None, 2, 'nearest']]  # 10   256ch  10×10 → 20×20
+
+  - [[-1, 6],   1, Concat,      [1]]                   # 11   384ch  cat(L10:256 + L6:128)  20×20
+
+  - [-1,        1, C2f,         [128]]                  # 12   128ch  20×20   n=1, no shortcut
+  #                                                             ↑ referenced by Concat at L18
+
+  - [-1,        1, nn.Upsample, [None, 2, 'nearest']]  # 13   128ch  20×20 → 40×40
+
+  - [[-1, 4],   1, Concat,      [1]]                   # 14   192ch  cat(L13:128 + L4:64)   40×40
+
+  - [-1,        1, C2f,         [64]]                   # 15    64ch  40×40   n=1, no shortcut
+  #                                                             P3/8 detection feature
+
+  # ── CBAM P3 ───────────────────────────────────────────────────────────────
+  - [-1,        1, CBAM,        [64]]                   # 16    64ch  40×40   ← attention on P3
+  #   channel attention:  64→8→64  (reduction=8)
+  #   spatial attention:  conv2d(2,1, k=3)
+  #   output → Detect head (small objects, 40×40 grid = 1600 anchors)
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # BOTTOM-UP PATH  (small → large feature downsample, P3 → P4 → P5)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - [-1,        1, Conv,        [64,  3, 2]]            # 17    64ch  40×40 → 20×20
+
+  - [[-1, 12],  1, Concat,      [1]]                   # 18   192ch  cat(L17:64 + L12:128)  20×20
+
+  - [-1,        1, C2f,         [128]]                  # 19   128ch  20×20   n=1, no shortcut
+  #                                                             P4/16 detection feature
+
+  # ── CBAM P4 ───────────────────────────────────────────────────────────────
+  - [-1,        1, CBAM,        [128]]                  # 20   128ch  20×20   ← attention on P4
+  #   channel attention:  128→16→128  (reduction=8)
+  #   spatial attention:  conv2d(2,1, k=3)
+  #   output → Detect head (medium objects, 20×20 grid = 400 anchors)
+
+  - [-1,        1, Conv,        [128, 3, 2]]            # 21   128ch  20×20 → 10×10
+
+  - [[-1, 9],   1, Concat,      [1]]                   # 22   384ch  cat(L21:128 + L9:256)  10×10
+
+  - [-1,        1, C2f,         [256]]                  # 23   256ch  10×10   n=1, no shortcut
+  #                                                             P5/32 detection feature
+
+  # ── CBAM P5 ───────────────────────────────────────────────────────────────
+  - [-1,        1, CBAM,        [256]]                  # 24   256ch  10×10   ← attention on P5
+  #   channel attention:  256→32→256  (reduction=8)
+  #   spatial attention:  conv2d(2,1, k=3)
+  #   output → Detect head (large objects, 10×10 grid = 100 anchors)
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # DETECT HEAD
+  # Receives three feature maps from CBAM-enhanced scales:
+  #   L16:  64ch  40×40   P3/8   small objects
+  #   L20: 128ch  20×20   P4/16  medium objects
+  #   L24: 256ch  10×10   P5/32  large objects
+  # ═══════════════════════════════════════════════════════════════════════════
+  - [[16, 20, 24], 1, Detect, [nc]]                    # 25   3-scale detection output

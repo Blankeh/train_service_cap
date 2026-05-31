@@ -20,9 +20,14 @@ python -m src.main --deploy          # also push model to Cloudflare after evalu
 2. For each image file (`.jpg`, `.jpeg`, `.png`, `.bmp`, `.tiff`):
    - Skips images that have no matching label file
    - Computes a SHA-256 hash of the image bytes — skips exact duplicates across datasets
-3. **Class remapping** — rewrites label files so all class IDs map to the unified class list (e.g. `man→0`, `woman→0`, `head→0` all become `person`)
-4. **Auto-split** — if a dataset only has a `train/` folder, it shuffles the unique images (seeded for reproducibility) and splits them into train/valid/test according to the ratios in `auto_split`
-5. Writes `merged_dataset/data.yaml` — the YOLO dataset descriptor consumed by training
+3. **Polygon → bbox conversion** — if a label line has more than 5 values (segmentation polygon format: `class x1 y1 x2 y2 ...`), computes `min/max` of the vertices to produce a standard YOLO bounding box (`class cx cy w h`)
+4. **Box-style normalization** — each dataset declares its annotation style via `box_style` (`head` or `body`). If it differs from `target_box_style` in the output config, boxes are geometrically converted:
+   - **body → head**: shrink to the top ~20% height and ~50% width of the body box (approximating head position)
+   - **head → body**: expand downward by the inverse ratios
+   - All values are clamped to `[0, 1]`
+5. **Class remapping** — rewrites label files so all class IDs map to the unified class list (e.g. `man→0`, `woman→0`, `head→0` all become `person`)
+6. **Auto-split** — if a dataset only has a `train/` folder, it shuffles the unique images (seeded for reproducibility) and splits them into train/valid/test according to the ratios in `auto_split`
+7. Writes `merged_dataset/data.yaml` — the YOLO dataset descriptor consumed by training
 
 **Output:**
 ```

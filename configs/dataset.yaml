@@ -3,6 +3,7 @@ datasets:
     name: passenger_counting
     class_map:
       0: 0   # head -> person
+    box_style: head
     splits: [train, valid, test]
 
   - path: "C:/Users/blank/Downloads/bus-passenger-mask-rcnn dupli.yolo26"
@@ -10,6 +11,7 @@ datasets:
     class_map:
       0: 0   # man -> person
       1: 0   # woman -> person
+    box_style: body
     splits: [train]          # only has train; will be split automatically
     auto_split:
       train: 0.80
@@ -20,4 +22,5 @@ output:
   path: ./merged_dataset
   classes:
     - person
+  target_box_style: head     # normalize all boxes to head style
   seed: 42

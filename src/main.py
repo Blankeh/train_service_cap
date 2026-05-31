@@ -44,22 +44,24 @@ def main() -> None:
 
     # ── 3. Export ─────────────────────────────────────────────────────────────
     logger.info("══ Stage 3/4  Export ════════════════════════")
-    best_onnx = ExportService(training_cfg).run(best_pt)
+    # ExportService always returns ONNX path (used for eval + OTA deploy).
+    # NCNN folder is exported additionally when format=ncnn and logged separately.
+    deploy_model = ExportService(training_cfg).run(best_pt)
 
     # ── 4. Evaluate ────────────────────────────────────────────────────────────
     logger.info("══ Stage 4/4  Evaluate ══════════════════════")
-    EvaluateService(training_cfg).run(best_onnx, data_yaml)
+    EvaluateService(training_cfg).run(deploy_model, data_yaml)
 
     # ── 5. Deploy (optional) ──────────────────────────────────────────────────
     if args.deploy or training_cfg.deploy.enabled:
         logger.info("══ Stage 5/5  Deploy ════════════════════════")
-        DeployService(training_cfg).run(best_onnx)
+        DeployService(training_cfg).run(deploy_model)
     else:
         logger.info("Deploy skipped (set CLOUDFLARE_DEPLOY_ENABLED=true or pass --deploy)")
 
     logger.info("Pipeline complete")
     logger.info(f"  PT   : {best_pt}")
-    logger.info(f"  ONNX : {best_onnx}")
+    logger.info(f"  ONNX : {deploy_model}")
 
 
 if __name__ == "__main__":

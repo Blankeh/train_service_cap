@@ -14,6 +14,7 @@ class DatasetEntry(BaseModel):
     path: str
     name: str
     class_map: dict[int, int]
+    box_style: str = "head"   # "head" or "body" — what the raw labels annotate
     splits: list[str]
     auto_split: Optional[dict[str, float]] = None
 
@@ -21,6 +22,7 @@ class DatasetEntry(BaseModel):
 class DatasetOutputConfig(BaseModel):
     path: str = "./merged_dataset"
     classes: list[str] = ["person"]
+    target_box_style: str = "head"  # normalize all labels to this style
     seed: int = 42
 
 
@@ -32,10 +34,14 @@ class DatasetConfig(BaseModel):
 # ── Training config (configs/training.yaml) ───────────────────────────────────
 
 class ExportConfig(BaseModel):
-    format: str = "onnx"
+    # Supported formats: onnx | ncnn | openvino
+    # ncnn is recommended for Raspberry Pi 4 (ARM NEON, no GPU)
+    # onnx is the reliable fallback when ncnn tools are unavailable
+    format: str = "ncnn"
     simplify: bool = True
     opset: int = 17
-    int8: bool = False
+    int8: bool = False       # INT8 quantization: ~2× faster on Pi4, needs calibration images
+    half: bool = False       # FP16: not useful on Pi4 ARM (no FP16 SIMD)
 
 
 class DeployConfig(BaseModel):
@@ -46,10 +52,14 @@ class DeployConfig(BaseModel):
 
 
 class TrainingConfig(BaseModel):
+    # Architecture: "default" uses base_model directly; "cbam" loads yolov8n_cbam.yaml
+    # and transfers pretrained backbone weights from base_model
+    arch: str = "cbam"
     base_model: str = "yolov8n.pt"
     epochs: int = 100
     batch: int = 16
-    imgsz: int = 640
+    # 320 recommended for Pi4 (4× fewer ops vs 640, ~90% accuracy retained)
+    imgsz: int = 320
     patience: int = 20
     workers: int = 8
     device: str = ""
