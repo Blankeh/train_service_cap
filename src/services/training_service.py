@@ -5,7 +5,7 @@ import torch
 from ultralytics import YOLO
 
 from ..core.config import TrainingConfig
-from ..core.custom_modules import register_custom_modules
+from ..core.custom_modules import CBAM, ECA, register_custom_modules
 
 logger = logging.getLogger(__name__)
 
@@ -14,30 +14,56 @@ _ARCH_YAML = {
 }
 
 
-def _transfer_backbone_weights(custom: YOLO, pretrained_tag: str) -> None:
+def _transfer_pretrained_weights(custom: YOLO, pretrained_tag: str) -> None:
     """
-    Copy matching weights from a standard pretrained model into the custom model.
+    Copy pretrained weights into the custom model — backbone, neck AND head.
 
-    Uses shape-based matching (strict=False equivalent) so that identical
-    backbone layers get the pretrained weights while new attention layers
-    (CBAM) keep their random initialisation.
+    The CBAM yaml is the standard YOLOv8n graph with attention blocks inserted
+    after each detection-scale C2f. Those insertions shift every later layer's
+    index, so a plain key match only recovers the layers before the first CBAM
+    (~58%), leaving the bottom-up neck and the entire Detect head randomly
+    initialised — which cripples box/class prediction.
+
+    Instead we align the two module lists positionally: the custom model is the
+    base model with CBAM/ECA layers inserted, so we walk both and skip the
+    custom-only attention layers, mapping every standard layer to its base
+    counterpart. Shape-checked transfer then fills backbone + neck + Detect box
+    head with pretrained weights; only the attention blocks and the class head
+    (reinitialised whenever nc differs from COCO's 80) start random — exactly
+    like normal YOLO fine-tuning.
     """
-    logger.info(f"Transferring backbone weights from {pretrained_tag} ...")
+    logger.info(f"Transferring pretrained weights from {pretrained_tag} ...")
     base = YOLO(pretrained_tag)
+
+    # Positionally align custom<->base, skipping custom-only attention layers.
+    idx_map: dict[int, int] = {}
+    b = 0
+    base_layers = base.model.model
+    for c, layer in enumerate(custom.model.model):
+        if isinstance(layer, (CBAM, ECA)):
+            continue  # custom-only — keep random init, don't consume a base layer
+        if b < len(base_layers):
+            idx_map[c] = b
+            b += 1
 
     custom_sd = custom.model.state_dict()
     base_sd = base.model.state_dict()
 
     matched = 0
     for key, tensor in custom_sd.items():
-        if key in base_sd and base_sd[key].shape == tensor.shape:
-            custom_sd[key] = base_sd[key]
-            matched += 1
+        parts = key.split(".")  # "model.<idx>.<rest>"
+        if len(parts) >= 3 and parts[0] == "model" and parts[1].isdigit():
+            c_idx = int(parts[1])
+            if c_idx in idx_map:
+                base_key = ".".join(["model", str(idx_map[c_idx]), *parts[2:]])
+                if base_key in base_sd and base_sd[base_key].shape == tensor.shape:
+                    custom_sd[key] = base_sd[base_key]
+                    matched += 1
 
     custom.model.load_state_dict(custom_sd)
     total = len(custom_sd)
     logger.info(f"  Transferred {matched}/{total} tensors "
-                f"({matched / total * 100:.1f}% — CBAM layers randomly initialised)")
+                f"({matched / total * 100:.1f}% — only attention + class head random)")
 
 
 class TrainingService:
@@ -63,7 +89,7 @@ class TrainingService:
                 raise FileNotFoundError(f"Model YAML not found: {yaml_path}")
             model = YOLO(str(yaml_path))
             logger.info(f"Architecture   : {cfg.arch} ({yaml_path.name})")
-            _transfer_backbone_weights(model, cfg.base_model)
+            _transfer_pretrained_weights(model, cfg.base_model)
 
         logger.info(f"Base model     : {cfg.base_model}")
         logger.info(f"Epochs         : {cfg.epochs}")
