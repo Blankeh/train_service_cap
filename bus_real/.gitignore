@@ -1,0 +1,6 @@
+# Don't commit raw frames (large/possibly sensitive); keep structure + labels.
+*/images/*
+!*/images/.gitkeep
+
+# Keep label files tracked (the valuable annotation work).
+!*/labels/*

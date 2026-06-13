@@ -6,6 +6,13 @@ datasets:
     box_style: head
     splits: [train, valid, test]
 
+  - path: "C:/Users/blank/Downloads/crowdhuman_yolo"
+    name: crowdhuman
+    class_map:
+      0: 0   # head -> person
+    box_style: head           # converted from CrowdHuman hbox (see scripts/convert_crowdhuman.py)
+    splits: [train, valid]
+
 output:
   path: ./merged_dataset
   classes:
