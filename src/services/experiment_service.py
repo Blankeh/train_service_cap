@@ -47,8 +47,10 @@ VARIANTS: list[Variant] = [
     Variant("p2head",        "configs/experiments/yolov8n_cbam_p2head.yaml", "backbone"),
 ]
 
-# Cheap screening budget.
-SCREEN_OVERRIDES = dict(imgsz=640, batch=32, epochs=40, patience=10, fraction=0.25)
+# Cheap screening budget. batch=16 (not 32) leaves VRAM headroom on the 16 GB
+# 5080 when the desktop is also using the GPU — a 32-batch screen OOM'd mid
+# epoch-1. Ranking stays fair: every variant uses the same batch.
+SCREEN_OVERRIDES = dict(imgsz=640, batch=16, epochs=40, patience=10, fraction=0.25)
 # Full training budget for the winner.
 FULL_OVERRIDES = dict(imgsz=640, batch=32, epochs=300, patience=30, fraction=1.0)
 
