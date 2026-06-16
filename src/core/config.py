@@ -55,14 +55,27 @@ class TrainingConfig(BaseModel):
     # Architecture: "default" uses base_model directly; "cbam" loads yolov8n_cbam.yaml
     # and transfers pretrained backbone weights from base_model
     arch: str = "cbam"
+    # Explicit architecture yaml path; when set it overrides _ARCH_YAML[arch].
+    # Used by the experiment runner to point at configs/experiments/*.yaml variants.
+    arch_yaml: Optional[str] = None
     base_model: str = "yolov8n.pt"
     epochs: int = 100
     batch: int = 16
-    # 320 recommended for Pi4 (4× fewer ops vs 640, ~90% accuracy retained)
-    imgsz: int = 320
+    # 640 to match deployment (ai_service YOLO_INPUT_SIZE=640). Measured: dropping
+    # to 320 loses ~16pts (recall 0.90->0.73, mAP50 0.94->0.79) — not worth it for
+    # the trigger-based upload pipeline. Only lower this if Pi4 FPS becomes a hard limit.
+    imgsz: int = 640
     patience: int = 20
     workers: int = 8
     device: str = ""
+    # Dataset fraction used per epoch — 1.0 for full training, <1.0 for cheap
+    # architecture screening (experiment runner sets ~0.25).
+    fraction: float = 1.0
+    # Pretrained weight transfer scope: "full" copies backbone+neck+box-head
+    # positionally (safe for CBAM/ECA placement variants); "backbone" stops at the
+    # base SPPF so topology-changing variants (e.g. P2 head) don't receive
+    # mismatched neck weights — those layers stay randomly initialised.
+    transfer_scope: str = "full"
     dataset: str = "./merged_dataset/data.yaml"
     runs_dir: str = "./runs"
     run_name: str = "passenger_yolov8"

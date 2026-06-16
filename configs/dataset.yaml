@@ -11,7 +11,8 @@ datasets:
     class_map:
       0: 0   # head -> person
     box_style: head           # converted from CrowdHuman hbox (see scripts/convert_crowdhuman.py)
-    splits: [train, valid]
+    splits: [train]           # train-only: dense crowds belong in training, not in the
+                              # validation yardstick (keeps val comparable to passenger domain)
 
 output:
   path: ./merged_dataset

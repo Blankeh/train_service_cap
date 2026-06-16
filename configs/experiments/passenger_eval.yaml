@@ -1,0 +1,10 @@
+# Passenger-only "apples-to-apples" evaluation dataset (relocated from the old
+# root _apples.yaml). Clean Roboflow passenger-counting set used to compare every
+# variant against run-7 on a consistent, single-class distribution.
+path: C:/Users/blank/Downloads/passenger counting.v8i.yolo26
+train: train/images
+val: valid/images
+test: test/images
+nc: 1
+names:
+  - person

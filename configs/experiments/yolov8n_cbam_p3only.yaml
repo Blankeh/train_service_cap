@@ -1,0 +1,40 @@
+# YOLOv8n-CBAM variant: CBAM on the P3 (small-object) scale ONLY.
+# Hypothesis: distant/small passengers are the recall gap; concentrate attention
+# on the highest-resolution detection scale and drop P4/P5 attention (cheaper).
+# Backbone identical to yolov8n.pt -> full pretrained transfer (transfer_scope=full).
+
+nc: 1
+depth_multiple: 1.0
+width_multiple: 1.0
+
+backbone:
+  - [-1, 1, Conv, [16,  3, 2]]    # 0   P1/2
+  - [-1, 1, Conv, [32,  3, 2]]    # 1   P2/4
+  - [-1, 1, C2f,  [32,  True]]    # 2
+  - [-1, 1, Conv, [64,  3, 2]]    # 3   P3/8
+  - [-1, 2, C2f,  [64,  True]]    # 4
+  - [-1, 1, Conv, [128, 3, 2]]    # 5   P4/16
+  - [-1, 2, C2f,  [128, True]]    # 6
+  - [-1, 1, Conv, [256, 3, 2]]    # 7   P5/32
+  - [-1, 1, C2f,  [256, True]]    # 8
+  - [-1, 1, SPPF, [256, 5]]       # 9
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]  # 10
+  - [[-1, 6], 1, Concat, [1]]                   # 11  cat(256 + L6:128)=384  20x20
+  - [-1, 1, C2f, [128]]                         # 12  top-down P4
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]  # 13
+  - [[-1, 4], 1, Concat, [1]]                   # 14  cat(128 + L4:64)=192   40x40
+  - [-1, 1, C2f, [64]]                          # 15  P3 feature
+  - [-1, 1, CBAM, [64]]                         # 16  ← CBAM on P3 only
+
+  - [-1, 1, Conv, [64, 3, 2]]                   # 17
+  - [[-1, 12], 1, Concat, [1]]                  # 18  cat(64 + L12:128)=192  20x20
+  - [-1, 1, C2f, [128]]                         # 19  P4 feature (no attention)
+
+  - [-1, 1, Conv, [128, 3, 2]]                  # 20
+  - [[-1, 9], 1, Concat, [1]]                   # 21  cat(128 + L9:256)=384  10x10
+  - [-1, 1, C2f, [256]]                         # 22  P5 feature (no attention)
+
+  - [[16, 19, 22], 1, Detect, [nc]]             # 23  P3(CBAM)/P4/P5

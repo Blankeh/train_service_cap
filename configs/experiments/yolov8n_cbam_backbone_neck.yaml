@@ -1,0 +1,46 @@
+# YOLOv8n-CBAM variant: CBAM in BOTH the backbone (after each detection-scale C2f)
+# AND the neck (after each detection-scale C2f). Maximal attention — measures
+# whether stacking attention helps recall or just adds compute.
+# All CBAM passthrough -> backbone+neck standard layers align positionally to
+# yolov8n.pt -> full pretrained transfer (transfer_scope=full).
+
+nc: 1
+depth_multiple: 1.0
+width_multiple: 1.0
+
+backbone:
+  - [-1, 1, Conv, [16,  3, 2]]    # 0   P1/2
+  - [-1, 1, Conv, [32,  3, 2]]    # 1   P2/4
+  - [-1, 1, C2f,  [32,  True]]    # 2
+  - [-1, 1, Conv, [64,  3, 2]]    # 3   P3/8
+  - [-1, 2, C2f,  [64,  True]]    # 4
+  - [-1, 1, CBAM, [64]]           # 5   ← CBAM P3 (backbone)
+  - [-1, 1, Conv, [128, 3, 2]]    # 6   P4/16
+  - [-1, 2, C2f,  [128, True]]    # 7
+  - [-1, 1, CBAM, [128]]          # 8   ← CBAM P4 (backbone)
+  - [-1, 1, Conv, [256, 3, 2]]    # 9   P5/32
+  - [-1, 1, C2f,  [256, True]]    # 10
+  - [-1, 1, CBAM, [256]]          # 11  ← CBAM P5 (backbone)
+  - [-1, 1, SPPF, [256, 5]]       # 12
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]  # 13  from SPPF L12
+  - [[-1, 8], 1, Concat, [1]]                   # 14  cat(256 + L8:128)=384  20x20
+  - [-1, 1, C2f, [128]]                         # 15  top-down P4
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]  # 16
+  - [[-1, 5], 1, Concat, [1]]                   # 17  cat(128 + L5:64)=192   40x40
+  - [-1, 1, C2f, [64]]                          # 18  P3 feature
+  - [-1, 1, CBAM, [64]]                         # 19  ← CBAM P3 (neck)
+
+  - [-1, 1, Conv, [64, 3, 2]]                   # 20
+  - [[-1, 15], 1, Concat, [1]]                  # 21  cat(64 + L15:128)=192  20x20
+  - [-1, 1, C2f, [128]]                         # 22  P4 feature
+  - [-1, 1, CBAM, [128]]                        # 23  ← CBAM P4 (neck)
+
+  - [-1, 1, Conv, [128, 3, 2]]                  # 24
+  - [[-1, 12], 1, Concat, [1]]                  # 25  cat(128 + L12:256)=384 10x10
+  - [-1, 1, C2f, [256]]                         # 26  P5 feature
+  - [-1, 1, CBAM, [256]]                        # 27  ← CBAM P5 (neck)
+
+  - [[19, 23, 27], 1, Detect, [nc]]             # 28  P3/P4/P5

@@ -1,0 +1,60 @@
+# YOLOv8n-CBAM variant: add a P2/4 (80x80) detection scale for small/distant
+# passengers. 4-scale Detect [P2, P3, P4, P5], CBAM on each output scale.
+#
+# TOPOLOGY CHANGE: the neck gains an extra top-down + bottom-up stage, so its
+# layer ordering no longer matches yolov8n.pt. Train this with
+# transfer_scope="backbone" so ONLY the backbone (idx 0..9) receives pretrained
+# weights and the diverging neck/head start random (positional alignment past the
+# backbone would copy mismatched tensors).
+#
+# Cost note: the 80x80 head adds 6400 anchors -> meaningfully more Pi4 compute.
+# Screening records params/GFLOPs so the accuracy/cost tradeoff is explicit.
+
+nc: 1
+depth_multiple: 1.0
+width_multiple: 1.0
+
+backbone:
+  - [-1, 1, Conv, [16,  3, 2]]    # 0   P1/2
+  - [-1, 1, Conv, [32,  3, 2]]    # 1   P2/4
+  - [-1, 1, C2f,  [32,  True]]    # 2   P2 feature (80x80, 32ch)
+  - [-1, 1, Conv, [64,  3, 2]]    # 3   P3/8
+  - [-1, 2, C2f,  [64,  True]]    # 4   P3 feature (40x40, 64ch)
+  - [-1, 1, Conv, [128, 3, 2]]    # 5   P4/16
+  - [-1, 2, C2f,  [128, True]]    # 6   P4 feature (20x20, 128ch)
+  - [-1, 1, Conv, [256, 3, 2]]    # 7   P5/32
+  - [-1, 1, C2f,  [256, True]]    # 8
+  - [-1, 1, SPPF, [256, 5]]       # 9   P5 feature (10x10, 256ch)
+
+head:
+  # ── top-down  P5 -> P4 -> P3 -> P2 ──────────────────────────────────────────
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]  # 10  256  10->20
+  - [[-1, 6], 1, Concat, [1]]                   # 11  cat(256 + L6:128)=384  20x20
+  - [-1, 1, C2f, [128]]                         # 12  td P4
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]  # 13  128  20->40
+  - [[-1, 4], 1, Concat, [1]]                   # 14  cat(128 + L4:64)=192   40x40
+  - [-1, 1, C2f, [64]]                          # 15  td P3
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]  # 16  64   40->80
+  - [[-1, 2], 1, Concat, [1]]                   # 17  cat(64 + L2:32)=96     80x80
+  - [-1, 1, C2f, [32]]                          # 18  P2 feature
+  - [-1, 1, CBAM, [32]]                         # 19  ← CBAM P2  (small objects)
+
+  # ── bottom-up  P2 -> P3 -> P4 -> P5 ─────────────────────────────────────────
+  - [-1, 1, Conv, [32, 3, 2]]                   # 20  32  80->40
+  - [[-1, 15], 1, Concat, [1]]                  # 21  cat(32 + L15:64)=96    40x40
+  - [-1, 1, C2f, [64]]                          # 22  P3 feature
+  - [-1, 1, CBAM, [64]]                         # 23  ← CBAM P3
+
+  - [-1, 1, Conv, [64, 3, 2]]                   # 24  64  40->20
+  - [[-1, 12], 1, Concat, [1]]                  # 25  cat(64 + L12:128)=192  20x20
+  - [-1, 1, C2f, [128]]                         # 26  P4 feature
+  - [-1, 1, CBAM, [128]]                        # 27  ← CBAM P4
+
+  - [-1, 1, Conv, [128, 3, 2]]                  # 28  128 20->10
+  - [[-1, 9], 1, Concat, [1]]                   # 29  cat(128 + L9:256)=384  10x10
+  - [-1, 1, C2f, [256]]                         # 30  P5 feature
+  - [-1, 1, CBAM, [256]]                        # 31  ← CBAM P5
+
+  - [[19, 23, 27, 31], 1, Detect, [nc]]         # 32  P2/P3/P4/P5 (4-scale)

@@ -4,6 +4,7 @@ from pathlib import Path
 from ultralytics import YOLO
 
 from ..core.config import TrainingConfig
+from ..core.custom_modules import register_custom_modules
 
 logger = logging.getLogger(__name__)
 
@@ -12,15 +13,21 @@ class EvaluateService:
     def __init__(self, config: TrainingConfig) -> None:
         self.config = config
 
-    def run(self, weights: Path, data_yaml: Path) -> dict:
-        """Run validation on the test split and return key metrics."""
-        logger.info(f"Evaluating {weights.name} on test split ...")
+    def run(self, weights: Path, data_yaml: Path, split: str = "test") -> dict:
+        """Run validation on the given split and return key metrics.
 
+        split: which dataset split to evaluate ("test", "val", ...). Defaults to
+        "test" for the pipeline; the experiment runner passes "val" and points
+        data_yaml at the passenger-only eval set for apples-to-apples ranking.
+        """
+        logger.info(f"Evaluating {weights.name} on {split} split ...")
+
+        register_custom_modules()  # so .pt checkpoints with CBAM/ECA layers load
         device = "cpu" if str(weights).endswith(".onnx") else (self.config.device or None)
         model = YOLO(str(weights))
         metrics = model.val(
             data=str(data_yaml),
-            split="test",
+            split=split,
             imgsz=self.config.imgsz,
             batch=self.config.batch,
             device=device,

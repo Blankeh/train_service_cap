@@ -14,7 +14,14 @@ _ARCH_YAML = {
 }
 
 
-def _transfer_pretrained_weights(custom: YOLO, pretrained_tag: str) -> None:
+# Base YOLOv8n backbone is layers 0..9 (Conv stem … SPPF). The neck/head start
+# at index 10. "backbone" transfer scope stops here.
+_BASE_BACKBONE_LAST = 9
+
+
+def _transfer_pretrained_weights(
+    custom: YOLO, pretrained_tag: str, scope: str = "full"
+) -> None:
     """
     Copy pretrained weights into the custom model — backbone, neck AND head.
 
@@ -31,8 +38,18 @@ def _transfer_pretrained_weights(custom: YOLO, pretrained_tag: str) -> None:
     head with pretrained weights; only the attention blocks and the class head
     (reinitialised whenever nc differs from COCO's 80) start random — exactly
     like normal YOLO fine-tuning.
+
+    scope:
+        "full"     — map every standard layer (placement variants whose neck is
+                     still the base neck with attention inserted).
+        "backbone" — only map standard layers up to the base SPPF (idx 9). Use
+                     for topology-changing variants (e.g. a P2 head) whose neck
+                     diverges from base: positional alignment past the backbone
+                     would copy mismatched weights, so leave the neck/head random.
     """
-    logger.info(f"Transferring pretrained weights from {pretrained_tag} ...")
+    logger.info(
+        f"Transferring pretrained weights from {pretrained_tag} (scope={scope}) ..."
+    )
     base = YOLO(pretrained_tag)
 
     # Positionally align custom<->base, skipping custom-only attention layers.
@@ -42,6 +59,8 @@ def _transfer_pretrained_weights(custom: YOLO, pretrained_tag: str) -> None:
     for c, layer in enumerate(custom.model.model):
         if isinstance(layer, (CBAM, ECA)):
             continue  # custom-only — keep random init, don't consume a base layer
+        if scope == "backbone" and b > _BASE_BACKBONE_LAST:
+            break     # neck/head diverges — stop, leave the rest randomly init
         if b < len(base_layers):
             idx_map[c] = b
             b += 1
@@ -62,8 +81,10 @@ def _transfer_pretrained_weights(custom: YOLO, pretrained_tag: str) -> None:
 
     custom.model.load_state_dict(custom_sd)
     total = len(custom_sd)
+    random_note = ("attention + class head random" if scope == "full"
+                   else "entire neck/head random (backbone-only transfer)")
     logger.info(f"  Transferred {matched}/{total} tensors "
-                f"({matched / total * 100:.1f}% — only attention + class head random)")
+                f"({matched / total * 100:.1f}% — {random_note})")
 
 
 class TrainingService:
@@ -84,17 +105,22 @@ class TrainingService:
             model = YOLO(cfg.base_model)
             logger.info(f"Architecture   : default ({cfg.base_model})")
         else:
-            yaml_path = Path(_ARCH_YAML.get(cfg.arch, _ARCH_YAML["cbam"]))
+            # Explicit arch_yaml (experiment variants) overrides the _ARCH_YAML map.
+            yaml_path = (
+                Path(cfg.arch_yaml) if cfg.arch_yaml
+                else Path(_ARCH_YAML.get(cfg.arch, _ARCH_YAML["cbam"]))
+            )
             if not yaml_path.exists():
                 raise FileNotFoundError(f"Model YAML not found: {yaml_path}")
             model = YOLO(str(yaml_path))
             logger.info(f"Architecture   : {cfg.arch} ({yaml_path.name})")
-            _transfer_pretrained_weights(model, cfg.base_model)
+            _transfer_pretrained_weights(model, cfg.base_model, cfg.transfer_scope)
 
         logger.info(f"Base model     : {cfg.base_model}")
         logger.info(f"Epochs         : {cfg.epochs}")
         logger.info(f"Batch          : {cfg.batch}")
         logger.info(f"Image size     : {cfg.imgsz}")
+        logger.info(f"Data fraction  : {cfg.fraction}")
         logger.info(f"Device         : {cfg.device or 'auto'}")
 
         model.train(
@@ -103,6 +129,7 @@ class TrainingService:
             batch=cfg.batch,
             imgsz=cfg.imgsz,
             patience=cfg.patience,
+            fraction=cfg.fraction,   # <1.0 for cheap architecture screening
             workers=cfg.workers,
             device=cfg.device or None,
             project=cfg.runs_dir,
@@ -115,12 +142,16 @@ class TrainingService:
             lr0=0.005,
             lrf=0.01,
             warmup_epochs=5,        # let random CBAM weights stabilise before full LR
-            # ── Augmentation: small dataset needs heavy aug to prevent CBAM overfitting
-            copy_paste=0.3,         # paste objects across images — good for crowded scenes
-            mixup=0.15,
-            degrees=10.0,
-            scale=0.6,
-            close_mosaic=20,        # disable mosaic last 20 epochs for cleaner box regression
+            # ── Augmentation: merged_dataset is now large (~40k imgs), so the heavy
+            # synthetic aug that guarded against overfitting on the old tiny set is
+            # no longer needed and was capping recall. Keep mild geometric aug only.
+            copy_paste=0.0,         # was 0.3 — unnecessary at this dataset size
+            mixup=0.0,              # was 0.15 — blends hurt single-class person recall
+            erasing=0.2,            # was default 0.4 — less aggressive occlusion
+            degrees=5.0,            # was 10.0
+            scale=0.5,              # was 0.6
+            mosaic=0.5,             # was default 1.0
+            close_mosaic=10,        # disable mosaic last 10 epochs for cleaner box regression
             # ── Regularisation
             weight_decay=0.0005,
             dropout=0.0,
